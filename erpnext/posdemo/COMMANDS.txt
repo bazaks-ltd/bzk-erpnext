@@ -1,0 +1,166 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║              POS DATA IMPORT - COMMAND REFERENCE                    ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+QUICK COMMANDS
+─────────────────────────────────────────────────────────────────────
+
+1. VALIDATE CSV FILES (Recommended first step)
+   ┌────────────────────────────────────────────────────────────────┐
+   │ cd /Volumes/TZARMORSP/wrk/pos/frappe-bench/apps/erpnext/erpnext/posdemo
+   │ python3 validate_csv_files.py                                  │
+   └────────────────────────────────────────────────────────────────┘
+
+2. RUN IMPORT (Interactive - EASIEST)
+   ┌────────────────────────────────────────────────────────────────┐
+   │ cd /Volumes/TZARMORSP/wrk/pos/frappe-bench/apps/erpnext/erpnext/posdemo
+   │ ./run_import.sh                                                │
+   └────────────────────────────────────────────────────────────────┘
+
+3. RUN IMPORT (Direct - specify site name)
+   ┌────────────────────────────────────────────────────────────────┐
+   │ cd /Volumes/TZARMORSP/wrk/pos/frappe-bench                     │
+   │ bench --site YOUR-SITE-NAME execute erpnext.posdemo.import_pos_data.main
+   └────────────────────────────────────────────────────────────────┘
+   
+   Replace YOUR-SITE-NAME with your actual site name
+
+4. RUN IMPORT (Console - for debugging)
+   ┌────────────────────────────────────────────────────────────────┐
+   │ cd /Volumes/TZARMORSP/wrk/pos/frappe-bench                     │
+   │ bench --site YOUR-SITE-NAME console                            │
+   │                                                                 │
+   │ Then in console:                                                │
+   │ >>> from erpnext.posdemo.import_pos_data import main            │
+   │ >>> main()                                                      │
+   └────────────────────────────────────────────────────────────────┘
+
+
+FILE STRUCTURE
+─────────────────────────────────────────────────────────────────────
+
+📁 /apps/erpnext/erpnext/posdemo/
+  
+  📊 DATA FILES (CSV):
+     01_uom_20251020_130909.csv ............. 8 UOMs
+     02_item_groups_20251020_130909.csv ..... 131 Item Groups
+     03_brands_20251020_130909.csv .......... 1 Brand
+     04_items_20251020_130909.csv ........... 2,247 Items
+     05_item_prices_20251020_130928.csv ..... 2,149 Item Prices
+  
+  🔧 SCRIPTS:
+     import_pos_data.py ..................... Main import script
+     validate_csv_files.py .................. CSV validator
+     run_import.sh .......................... Bash runner
+  
+  📖 DOCUMENTATION:
+     QUICKSTART.md .......................... Quick start guide
+     README_IMPORT.md ....................... Full documentation
+     INDEX.md ............................... Files overview
+     COMMANDS.txt ........................... This file
+
+
+IMPORT ORDER
+─────────────────────────────────────────────────────────────────────
+
+The script automatically imports in this order:
+
+  1. UOM                     (8 records)
+  2. Item Groups            (131 records)
+  3. Brands                  (1 record)
+  4. Items                 (2,247 records) ← Takes longest
+  5. Item Prices           (2,149 records)
+  ─────────────────────────────────────────
+  TOTAL:                   (4,536 records)
+
+
+WORKFLOW
+─────────────────────────────────────────────────────────────────────
+
+  Step 1: Validate
+          └─→ python3 validate_csv_files.py
+  
+  Step 2: Import
+          └─→ ./run_import.sh
+          
+  Step 3: Verify in ERPNext
+          └─→ Stock → Item → Item
+          └─→ Stock → Item → Item Price
+
+
+TROUBLESHOOTING
+─────────────────────────────────────────────────────────────────────
+
+Problem: "Site not found"
+Solution: List sites: bench --site
+          Use exact site name from sites/ folder
+
+Problem: "Permission denied" on scripts
+Solution: chmod +x run_import.sh
+          chmod +x validate_csv_files.py
+
+Problem: "Module not found"
+Solution: Make sure you run from bench directory
+
+Problem: Import too slow
+Solution: Normal! 2,247 items take 5-15 minutes
+          Check progress in output
+
+Problem: Some records failed
+Solution: Safe to re-run! Script skips existing records
+          Check error messages for specific issues
+
+
+VERIFICATION COMMANDS
+─────────────────────────────────────────────────────────────────────
+
+After import, verify data from ERPNext or console:
+
+Check item count:
+┌────────────────────────────────────────────────────────────────┐
+│ bench --site YOUR-SITE-NAME console                            │
+│ >>> frappe.db.count('Item')                                     │
+└────────────────────────────────────────────────────────────────┘
+
+Check specific item:
+┌────────────────────────────────────────────────────────────────┐
+│ >>> frappe.get_doc('Item', 'TI_VERGER_MANGO_PUREE_500G')       │
+└────────────────────────────────────────────────────────────────┘
+
+
+TIPS & BEST PRACTICES
+─────────────────────────────────────────────────────────────────────
+
+✓ Always validate first (python3 validate_csv_files.py)
+✓ Safe to re-run - skips existing records
+✓ Can interrupt (Ctrl+C) and resume later
+✓ Test on staging site first if available
+✓ Check output for errors - they're detailed
+✓ Expect 5-15 minutes for full import
+
+
+EXPECTED OUTPUT
+─────────────────────────────────────────────────────────────────────
+
+You should see:
+  ✓ Success (record created)
+  ⊙ Skipped (record exists)
+  ✗ Error (record failed with reason)
+
+Final summary shows:
+  - Records created
+  - Records skipped
+  - Records with errors
+
+
+MORE HELP
+─────────────────────────────────────────────────────────────────────
+
+• Quick Start Guide: cat QUICKSTART.md
+• Full Documentation: cat README_IMPORT.md  
+• File Overview: cat INDEX.md
+
+╔══════════════════════════════════════════════════════════════════════╗
+║                      Happy Importing! 🚀                            ║
+╚══════════════════════════════════════════════════════════════════════╝
+
