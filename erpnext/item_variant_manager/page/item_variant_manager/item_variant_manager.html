@@ -1,0 +1,97 @@
+<div class="variant-manager-header" style="padding: 12px 15px; background-color: #f8f9fa; border-bottom: 1px solid #dee2e6;">
+	<div class="row">
+		<div class="col-sm-2 text-muted" style="margin-top: 8px;">
+			<strong>Item Code</strong>
+		</div>
+		<div class="col-sm-3 text-muted" style="margin-top: 8px;">
+			<strong>Attributes</strong>
+		</div>
+		<div class="col-sm-2 text-muted" style="margin-top: 8px;">
+			<strong>Stock Qty</strong>
+		</div>
+		<div class="col-sm-4 text-muted" style="margin-top: 8px;">
+			<strong>Prices</strong>
+		</div>
+		<div class="col-sm-1 text-muted" style="margin-top: 8px;">
+			<strong>Actions</strong>
+		</div>
+	</div>
+</div>
+
+<div class="variant-list-container" style="max-height: 600px; overflow-y: auto;">
+	{% for variant in variants %}
+	<div class="variant-item dashboard-list-item" data-variant="{{ variant.item_code }}" style="padding: 10px 15px; border-bottom: 1px solid #e9ecef;">
+		<div class="row">
+			<div class="col-sm-2" style="margin-top: 8px;">
+				<a href="/app/item/{{ variant.item_code }}" target="_blank" class="variant-link">
+					<strong>{{ variant.item_code }}</strong>
+				</a>
+				{% if variant.disabled %}
+				<br><span class="badge badge-secondary">Disabled</span>
+				{% endif %}
+			</div>
+			<div class="col-sm-3" style="margin-top: 8px;">
+				{% for attr in variant.attributes %}
+				<div>
+					<small class="text-muted">{{ attr.attribute }}:</small>
+					<strong>{{ attr.attribute_value }}</strong>
+				</div>
+				{% endfor %}
+			</div>
+			<div class="col-sm-2" style="margin-top: 8px;">
+				<span class="stock-qty" data-variant="{{ variant.item_code }}">
+					{{ variant.stock_qty }} {{ variant.stock_uom }}
+				</span>
+			</div>
+			<div class="col-sm-4 price-list-container" data-variant="{{ variant.item_code }}">
+				{% for price_list in price_lists %}
+				<div class="price-item" style="margin-bottom: 5px;" data-price-list="{{ price_list.name }}">
+					<small class="text-muted">{{ price_list.name }}:</small>
+					{% if variant.prices and variant.prices[price_list.name] %}
+						{% set price_rate = variant.prices[price_list.name].rate %}
+					{% else %}
+						{% set price_rate = "" %}
+					{% endif %}
+					<input 
+						type="number" 
+						class="form-control price-input" 
+						style="display: inline-block; width: 120px; margin-left: 5px;"
+						data-variant="{{ variant.item_code }}"
+						data-price-list="{{ price_list.name }}"
+						data-currency="{{ price_list.currency }}"
+						value="{{ price_rate }}"
+						placeholder="0.00"
+						step="0.01"
+					/>
+					<span class="currency-symbol">{{ price_list.currency }}</span>
+					<button 
+						class="btn btn-xs btn-primary save-price-btn" 
+						style="margin-left: 5px; display: none;"
+						data-variant="{{ variant.item_code }}"
+						data-price-list="{{ price_list.name }}"
+					>
+						Save
+					</button>
+				</div>
+				{% endfor %}
+			</div>
+			<div class="col-sm-1" style="margin-top: 8px;">
+				<button 
+					class="btn btn-xs btn-secondary refresh-stock-btn" 
+					data-variant="{{ variant.item_code }}"
+					title="Refresh Stock"
+				>
+					<i class="fa fa-refresh"></i>
+				</button>
+			</div>
+		</div>
+	</div>
+	{% endfor %}
+</div>
+
+{% if not variants %}
+<div class="no-variants" style="padding: 40px; text-align: center; color: #6c757d;">
+	<p>No variants found for this template item.</p>
+</div>
+{% endif %}
+

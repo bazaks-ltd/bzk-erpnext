@@ -143,6 +143,25 @@ frappe.ui.form.on("Item", {
 			);
 
 			frm.add_custom_button(
+				__("Manage Variants"),
+				function () {
+					frappe.route_options = { "template-item": frm.doc.name };
+					frappe.set_route("item-variant-manager");
+				},
+				__("View")
+			);
+		} else if (frm.doc.variant_of) {
+			// If this is a variant, show button to manage variants of the template
+			frm.add_custom_button(
+				__("Manage Variants"),
+				function () {
+					frappe.route_options = { "template-item": frm.doc.variant_of };
+					frappe.set_route("item-variant-manager");
+				},
+				__("View")
+			);
+
+			frm.add_custom_button(
 				__("Item Variant Settings"),
 				function () {
 					frappe.set_route("Form", "Item Variant Settings");
