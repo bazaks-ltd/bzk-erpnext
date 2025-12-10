@@ -150,17 +150,6 @@ frappe.ui.form.on("Item", {
 				},
 				__("View")
 			);
-		} else if (frm.doc.variant_of) {
-			// If this is a variant, show button to manage variants of the template
-			frm.add_custom_button(
-				__("Manage Variants"),
-				function () {
-					frappe.route_options = { "template-item": frm.doc.variant_of };
-					frappe.set_route("item-variant-manager");
-				},
-				__("View")
-			);
-
 			frm.add_custom_button(
 				__("Item Variant Settings"),
 				function () {
@@ -201,6 +190,18 @@ frappe.ui.form.on("Item", {
 					__("Create")
 				);
 			}
+		} else if (frm.doc.variant_of) {
+			// If this is a variant, show button to manage variants of the template
+			frm.add_custom_button(
+				__("Manage Variants"),
+				function () {
+					frappe.route_options = { "template-item": frm.doc.variant_of };
+					frappe.set_route("item-variant-manager");
+				},
+				__("View")
+			);
+
+
 
 			// frm.page.set_inner_btn_group_as_primary(__('Create'));
 		}
