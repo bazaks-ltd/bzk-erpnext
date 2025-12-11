@@ -546,18 +546,12 @@ frappe.pages["item-variant-manager"].on_page_load = function (wrapper) {
 					var stock_qty = variant.stock_by_warehouse && variant.stock_by_warehouse[wh] ? variant.stock_by_warehouse[wh] : 0;
 					html += '<div class="col-sm-' + col_width + '" style="margin-top: 8px;">';
 					html += '<div style="font-size: 9px; color: #666; margin-bottom: 2px;">Current: ' + stock_qty.toFixed(0) + '</div>';
-					html += '<input type="number" class="form-control stock-qty-input" ';
-					html += 'style="display: inline-block; width: 80px; font-size: 11px;" ';
+					html += '<button class="btn btn-xs btn-primary manage-stock-btn" ';
+					html += 'style="font-size: 10px; padding: 2px 8px;" ';
 					html += 'data-variant="' + frappe.utils.escape_html(variant.item_code) + '" ';
 					html += 'data-warehouse="' + frappe.utils.escape_html(wh) + '" ';
-					html += 'value="' + stock_qty.toFixed(0) + '" placeholder="0" step="1" min="0" ';
-					html += 'title="' + __("Set stock quantity to this value (Stock Reconciliation)") + '" /> ';
-					html += '<button class="btn btn-xs btn-primary save-stock-btn" ';
-					html += 'style="margin-left: 3px; display: none; font-size: 10px; padding: 2px 5px;" ';
-					html += 'data-variant="' + frappe.utils.escape_html(variant.item_code) + '" ';
-					html += 'data-warehouse="' + frappe.utils.escape_html(wh) + '" ';
-					html += 'title="' + __("Reconcile Stock") + '">';
-					html += '<i class="fa fa-check"></i></button>';
+					html += 'title="' + __("Manage Stock") + '">';
+					html += '<i class="fa fa-edit"></i> ' + __("Manage") + '</button>';
 					html += '</div>';
 				});
 			} else {
@@ -666,6 +660,7 @@ frappe.pages["item-variant-manager"].on_page_load = function (wrapper) {
 
 	// Initialize stock update tracking at page level
 	page.stockUpdateInProgress = {};
+	page.stockManagementDialogOpen = false;
 	
 	// Setup event handlers
 	page.setup_event_handlers = function() {
@@ -716,92 +711,38 @@ frappe.pages["item-variant-manager"].on_page_load = function (wrapper) {
 			});
 		});
 
-		// Stock qty input change handlers
-		page.content_area.find('.stock-qty-input').on('input', function() {
-			var $btn = $(this).siblings('.save-stock-btn');
-			$btn.show();
-		});
-
-		// Save stock button - prevent multiple clicks
+		// Manage stock button - opens dialog for stock correction or stock entry
 		// Remove any existing handlers first to prevent duplicates
-		page.content_area.off('click', '.save-stock-btn');
-		page.content_area.on('click', '.save-stock-btn', function(e) {
+		page.content_area.off('click', '.manage-stock-btn');
+		page.content_area.on('click', '.manage-stock-btn', function(e) {
 			e.preventDefault();
 			e.stopPropagation();
 			e.stopImmediatePropagation();
 			
 			var $btn = $(this);
 			
-			// Check if button is already disabled
+			// Prevent multiple clicks
 			if ($btn.prop('disabled')) {
 				return false;
 			}
 			
 			var variant_code = $btn.data('variant');
 			var warehouse = $btn.data('warehouse');
-			var key = variant_code + '_' + warehouse;
 			
-			// Prevent multiple simultaneous updates
-			if (page.stockUpdateInProgress[key]) {
+			// Prevent opening multiple dialogs
+			if (page.stockManagementDialogOpen) {
 				return false;
 			}
 			
-			var $input = $btn.siblings('.stock-qty-input');
-			var qty = parseFloat($input.val());
-
-			if (isNaN(qty) || qty < 0) {
-				frappe.msgprint(__("Please enter a valid quantity"));
-				return false;
+			// Get current stock
+			var current_qty = 0;
+			var variant_data = page.variants_data.variants.find(v => v.item_code === variant_code);
+			if (variant_data && variant_data.stock_by_warehouse) {
+				current_qty = variant_data.stock_by_warehouse[warehouse] || 0;
 			}
-
-			// Set flag and disable button immediately
-			page.stockUpdateInProgress[key] = true;
-			$btn.prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i>');
-
-			frappe.call({
-				method: "erpnext.item_variant_manager.api.item_variant_manager.update_stock_qty",
-				args: {
-					variant_code: variant_code,
-					warehouse: warehouse,
-					qty: qty,
-					company: page.company_field ? page.company_field.get_value() : null
-				},
-				callback: function(r) {
-					// Clear flag and re-enable button
-					page.stockUpdateInProgress[key] = false;
-					$btn.prop('disabled', false);
-					
-					if (r.message && r.message.success) {
-						$btn.hide();
-						// Reload variants to get the actual updated stock from the database
-						page.load_variants();
-						frappe.show_alert({
-							message: __("Stock reconciled to {0}", [qty]),
-							indicator: 'green'
-						}, 3);
-					} else {
-						$btn.html('<i class="fa fa-check"></i>');
-					}
-				},
-				error: function(r) {
-					// Clear flag and re-enable button
-					page.stockUpdateInProgress[key] = false;
-					$btn.prop('disabled', false).html('<i class="fa fa-check"></i>');
-					
-					var error_msg = r.message || "Unknown error";
-					if (typeof error_msg === 'string') {
-						frappe.msgprint(__("Error updating stock: {0}", [error_msg]));
-					} else if (error_msg.exc_type) {
-						frappe.msgprint(__("Error updating stock: {0}", [error_msg.exc_message || error_msg.exc_type]));
-					} else if (error_msg.message) {
-						frappe.msgprint(__("Error updating stock: {0}", [error_msg.message]));
-					} else {
-						frappe.msgprint(__("Error updating stock: {0}", [JSON.stringify(error_msg)]));
-					}
-					// Reload variants to refresh stock data
-					page.load_variants();
-				}
-			});
+			
+			// Show dialog to choose between Stock Reconciliation or Stock Entry
+			page.show_stock_management_dialog(variant_code, warehouse, current_qty);
 			
 			return false;
 		});
@@ -1726,5 +1667,183 @@ frappe.pages["item-variant-manager"].on_page_load = function (wrapper) {
 				frappe.msgprint(__("Error setting valuation rates: {0}", [r.message || "Unknown error"]));
 			}
 		});
+	};
+
+	// Show stock management dialog
+	page.show_stock_management_dialog = function(variant_code, warehouse, current_qty) {
+		// Prevent opening multiple dialogs
+		if (page.stockManagementDialogOpen) {
+			return;
+		}
+		
+		var fields = [
+			{
+				fieldtype: 'Section Break',
+				label: __("Stock Management Options")
+			},
+			{
+				fieldtype: 'Select',
+				label: __("Action Type"),
+				fieldname: 'action_type',
+				options: __("Stock Reconciliation (Correct Stock)\nStock Entry (Add/Remove Stock)"),
+				reqd: 1,
+				default: 'Stock Reconciliation (Correct Stock)'
+			},
+			{
+				fieldtype: 'Column Break'
+			},
+			{
+				fieldtype: 'Float',
+				label: __("Current Stock"),
+				fieldname: 'current_qty',
+				default: current_qty,
+				read_only: 1
+			},
+			{
+				fieldtype: 'Section Break'
+			},
+			{
+				fieldtype: 'Float',
+				label: __("Quantity"),
+				fieldname: 'qty',
+				reqd: 1,
+				description: __("For Stock Reconciliation: Set the exact quantity. For Stock Entry: Enter the quantity to add (positive) or remove (negative).")
+			},
+			{
+				fieldtype: 'Column Break'
+			},
+			{
+				fieldtype: 'Data',
+				label: __("Item Code"),
+				fieldname: 'item_code',
+				default: variant_code,
+				read_only: 1
+			},
+			{
+				fieldtype: 'Link',
+				label: __("Warehouse"),
+				fieldname: 'warehouse',
+				options: 'Warehouse',
+				default: warehouse,
+				reqd: 1,
+				get_query: function() {
+					var company = page.company_field ? page.company_field.get_value() : null;
+					if (company) {
+						return {
+							filters: {
+								company: company,
+								is_group: 0
+							}
+						};
+					}
+					return {
+						filters: {
+							is_group: 0
+						}
+					};
+				}
+			}
+		];
+
+		var d = new frappe.ui.Dialog({
+			title: __("Manage Stock"),
+			fields: fields,
+			primary_action_label: __("Proceed"),
+			primary_action: function(values) {
+				d.hide();
+				page.process_stock_management(variant_code, warehouse, values);
+			},
+			onhide: function() {
+				// Clear flag when dialog is closed
+				page.stockManagementDialogOpen = false;
+			}
+		});
+
+		// Set flag before showing
+		page.stockManagementDialogOpen = true;
+		d.show();
+	};
+
+	// Process stock management action
+	page.process_stock_management = function(variant_code, warehouse, values) {
+		var company = page.company_field ? page.company_field.get_value() : null;
+		
+		// Determine action type from selected value
+		var is_reconcile = values.action_type === 'Stock Reconciliation (Correct Stock)' || values.action_type === 'reconcile';
+		
+		if (is_reconcile) {
+			// Stock Reconciliation
+			frappe.call({
+				method: "erpnext.item_variant_manager.api.item_variant_manager.update_stock_qty",
+				args: {
+					variant_code: variant_code,
+					warehouse: values.warehouse || warehouse,
+					qty: values.qty,
+					company: company
+				},
+				freeze: true,
+				freeze_message: __("Reconciling stock..."),
+				callback: function(r) {
+					if (r.message && r.message.success) {
+						frappe.show_alert({
+							message: __("Stock reconciled to {0}", [values.qty]),
+							indicator: 'green'
+						}, 3);
+						page.load_variants();
+					}
+				},
+				error: function(r) {
+					var error_msg = r.message || "Unknown error";
+					if (typeof error_msg === 'string') {
+						frappe.msgprint(__("Error reconciling stock: {0}", [error_msg]));
+					} else if (error_msg.exc_type) {
+						frappe.msgprint(__("Error reconciling stock: {0}", [error_msg.exc_message || error_msg.exc_type]));
+					} else if (error_msg.message) {
+						frappe.msgprint(__("Error reconciling stock: {0}", [error_msg.message]));
+					} else {
+						frappe.msgprint(__("Error reconciling stock: {0}", [JSON.stringify(error_msg)]));
+					}
+				}
+			});
+		} else {
+			// Stock Entry - create via API and open form
+			frappe.call({
+				method: "erpnext.item_variant_manager.api.item_variant_manager.create_stock_entry",
+				args: {
+					variant_code: variant_code,
+					warehouse: values.warehouse || warehouse,
+					qty: values.qty,
+					company: company
+				},
+				freeze: true,
+				freeze_message: __("Creating Stock Entry..."),
+				callback: function(r) {
+					if (r.message && r.message.success) {
+						frappe.show_alert({
+							message: __("Stock Entry {0} created", [r.message.stock_entry]),
+							indicator: 'green'
+						}, 3);
+						// Open the created Stock Entry
+						frappe.set_route("Form", "Stock Entry", r.message.stock_entry);
+						// Reload variants after a delay to allow form to open
+						setTimeout(function() {
+							page.load_variants();
+						}, 1000);
+					}
+				},
+				error: function(r) {
+					var error_msg = r.message || "Unknown error";
+					if (typeof error_msg === 'string') {
+						frappe.msgprint(__("Error creating Stock Entry: {0}", [error_msg]));
+					} else if (error_msg.exc_type) {
+						frappe.msgprint(__("Error creating Stock Entry: {0}", [error_msg.exc_message || error_msg.exc_type]));
+					} else if (error_msg.message) {
+						frappe.msgprint(__("Error creating Stock Entry: {0}", [error_msg.message]));
+					} else {
+						frappe.msgprint(__("Error creating Stock Entry: {0}", [JSON.stringify(error_msg)]));
+					}
+				}
+			});
+		}
 	};
 };

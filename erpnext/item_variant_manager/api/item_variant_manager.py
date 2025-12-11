@@ -669,6 +669,86 @@ def update_stock_qty(variant_code, warehouse, qty, company=None):
 
 
 @frappe.whitelist()
+def create_stock_entry(variant_code, warehouse, qty, company=None):
+	"""Create a Stock Entry for adding or removing stock"""
+	
+	if not variant_code or not warehouse or qty is None:
+		frappe.throw(_("Variant Code, Warehouse, and Quantity are required"))
+	
+	# Validate that the variant exists
+	if not frappe.db.exists("Item", variant_code):
+		frappe.throw(_("Item {0} does not exist").format(variant_code))
+	
+	# Validate that the warehouse exists
+	if not frappe.db.exists("Warehouse", warehouse):
+		frappe.throw(_("Warehouse {0} does not exist").format(warehouse))
+	
+	# Get company from warehouse if not provided
+	if not company:
+		company = frappe.db.get_value("Warehouse", warehouse, "company")
+		if not company:
+			frappe.throw(_("Company not found for warehouse {0}").format(warehouse))
+	
+	from frappe.utils import nowdate, nowtime
+	
+	# Determine stock entry type based on quantity
+	if flt(qty) > 0:
+		stock_entry_type = "Material Receipt"
+		t_warehouse = warehouse
+		s_warehouse = None
+		qty_to_use = flt(qty)
+	else:
+		stock_entry_type = "Material Issue"
+		t_warehouse = None
+		s_warehouse = warehouse
+		qty_to_use = abs(flt(qty))
+	
+	# Create Stock Entry
+	stock_entry = frappe.new_doc("Stock Entry")
+	stock_entry.stock_entry_type = stock_entry_type
+	stock_entry.posting_date = nowdate()
+	stock_entry.posting_time = nowtime()
+	stock_entry.company = company
+	
+	# Get default expense account and cost center
+	expense_account = frappe.get_cached_value("Company", company, "stock_adjustment_account")
+	if expense_account:
+		stock_entry.expense_account = expense_account
+	
+	cost_center = frappe.get_cached_value("Company", company, "cost_center")
+	if cost_center:
+		stock_entry.cost_center = cost_center
+	
+	# Get valuation rate
+	valuation_rate = frappe.db.get_value("Bin", {"item_code": variant_code, "warehouse": warehouse}, "valuation_rate")
+	if not valuation_rate:
+		valuation_rate = frappe.db.get_value("Item", variant_code, "valuation_rate") or 0
+	
+	# Add item row
+	item_row = stock_entry.append("items", {
+		"item_code": variant_code,
+		"qty": qty_to_use,
+		"uom": frappe.db.get_value("Item", variant_code, "stock_uom"),
+		"valuation_rate": flt(valuation_rate)
+	})
+	
+	if t_warehouse:
+		item_row.t_warehouse = t_warehouse
+	if s_warehouse:
+		item_row.s_warehouse = s_warehouse
+	
+	# Save (but don't submit - let user review and submit)
+	stock_entry.insert()
+	frappe.db.commit()
+	
+	return {
+		"success": True,
+		"stock_entry": stock_entry.name,
+		"message": _("Stock Entry {0} created").format(stock_entry.name)
+	}
+
+
+@frappe.whitelist()
 def bulk_set_prices(template_item, price_list, rate, attribute=None, attribute_value=None):
 	"""Bulk set prices for all variants or variants matching attribute"""
 	
