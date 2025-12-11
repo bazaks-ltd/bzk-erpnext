@@ -737,14 +737,15 @@ def create_stock_entry(variant_code, warehouse, qty, company=None):
 	if s_warehouse:
 		item_row.s_warehouse = s_warehouse
 	
-	# Save (but don't submit - let user review and submit)
+	# Save and submit (same as Stock Reconciliation)
 	stock_entry.insert()
+	stock_entry.submit()
 	frappe.db.commit()
 	
 	return {
 		"success": True,
 		"stock_entry": stock_entry.name,
-		"message": _("Stock Entry {0} created").format(stock_entry.name)
+		"message": _("Stock Entry {0} created and submitted").format(stock_entry.name)
 	}
 
 

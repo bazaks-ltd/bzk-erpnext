@@ -1806,7 +1806,7 @@ frappe.pages["item-variant-manager"].on_page_load = function (wrapper) {
 				}
 			});
 		} else {
-			// Stock Entry - create via API and open form
+			// Stock Entry - create via API and submit (same as Stock Reconciliation)
 			frappe.call({
 				method: "erpnext.item_variant_manager.api.item_variant_manager.create_stock_entry",
 				args: {
@@ -1816,19 +1816,15 @@ frappe.pages["item-variant-manager"].on_page_load = function (wrapper) {
 					company: company
 				},
 				freeze: true,
-				freeze_message: __("Creating Stock Entry..."),
+				freeze_message: __("Creating and submitting Stock Entry..."),
 				callback: function(r) {
 					if (r.message && r.message.success) {
+						var entry_type = parseFloat(values.qty) > 0 ? __("Material Receipt") : __("Material Issue");
 						frappe.show_alert({
-							message: __("Stock Entry {0} created", [r.message.stock_entry]),
+							message: __("Stock Entry {0} ({1}) created and submitted", [r.message.stock_entry, entry_type]),
 							indicator: 'green'
 						}, 3);
-						// Open the created Stock Entry
-						frappe.set_route("Form", "Stock Entry", r.message.stock_entry);
-						// Reload variants after a delay to allow form to open
-						setTimeout(function() {
-							page.load_variants();
-						}, 1000);
+						page.load_variants();
 					}
 				},
 				error: function(r) {
