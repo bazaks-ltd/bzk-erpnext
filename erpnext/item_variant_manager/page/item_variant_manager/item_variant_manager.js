@@ -410,6 +410,11 @@ frappe.pages["item-variant-manager"].on_page_load = function (wrapper) {
 		page.show_bulk_set_prices_dialog();
 	}, { icon: "tag" });
 
+	// Missing variants — create combinations that do not exist yet
+	page.add_button(__("Missing Variants"), function() {
+		page.show_missing_variants_dialog();
+	}, { icon: "alert" });
+
 	// Bulk set valuation rate button
 	page.add_button(__("Bulk Set Valuation Rate"), function() {
 		page.show_bulk_set_valuation_rate_dialog();
@@ -958,6 +963,150 @@ frappe.pages["item-variant-manager"].on_page_load = function (wrapper) {
 				} else {
 					frappe.msgprint(__("Error creating variant: {0}", [JSON.stringify(error_msg)]));
 				}
+			}
+		});
+	};
+
+	// Missing variants dialog
+	page.show_missing_variants_dialog = function() {
+		if (!page.template_item) {
+			frappe.msgprint(__("Please select a template item first"));
+			return;
+		}
+
+		frappe.call({
+			method: "erpnext.item_variant_manager.api.item_variant_manager.get_missing_variant_combinations",
+			args: {
+				template_item: page.template_item
+			},
+			freeze: true,
+			freeze_message: __("Finding missing variants..."),
+			callback: function(r) {
+				var missing = r.message || [];
+				if (!missing.length) {
+					frappe.msgprint(__("All variant combinations for this template already exist."));
+					return;
+				}
+
+				var attrOrder = Object.keys(missing[0]);
+				function format_combo(combo) {
+					return attrOrder.map(function(k) {
+						return k + ": " + combo[k];
+					}).join(", ");
+				}
+
+				var d = new frappe.ui.Dialog({
+					title: __("Missing Variants"),
+					fields: [
+						{
+							fieldtype: "Currency",
+							fieldname: "valuation_rate",
+							label: __("Valuation Rate"),
+							reqd: 1
+						},
+						{
+							fieldtype: "Currency",
+							fieldname: "standard_selling_rate",
+							label: __("Standard Selling Rate"),
+							reqd: 1,
+							description: __("Applied to the selling price list from Selling Settings (defaults to Standard Selling).")
+						},
+						{
+							fieldtype: "Section Break",
+							fieldname: "missing_sb"
+						},
+						{
+							fieldtype: "HTML",
+							fieldname: "missing_variants_list",
+							label: __("Select combinations to create")
+						}
+					],
+					primary_action_label: __("Create"),
+					primary_action: function() {
+						var values = d.get_values();
+						if (!values) {
+							return;
+						}
+						var selected = [];
+						d.$wrapper.find(".missing-variant-cb:checked").each(function() {
+							var idx = parseInt($(this).attr("data-idx"), 10);
+							if (!isNaN(idx) && missing[idx]) {
+								selected.push(missing[idx]);
+							}
+						});
+						if (!selected.length) {
+							frappe.msgprint(__("Select at least one variant."));
+							return;
+						}
+						d.hide();
+						frappe.call({
+							method: "erpnext.item_variant_manager.api.item_variant_manager.create_missing_variants_batch",
+							args: {
+								template_item: page.template_item,
+								combinations: JSON.stringify(selected),
+								valuation_rate: values.valuation_rate,
+								standard_selling_rate: values.standard_selling_rate
+							},
+							freeze: true,
+							freeze_message: __("Creating variants..."),
+							callback: function(res) {
+								var msg = res.message || {};
+								var created = msg.created || [];
+								var errors = msg.errors || [];
+								if (created.length) {
+									frappe.show_alert({
+										message: __("Created {0} variant(s)", [created.length]),
+										indicator: "green"
+									}, 5);
+								}
+								if (errors.length) {
+									var errText = errors.map(function(e) {
+										return (e.error || "") + " — " + JSON.stringify(e.attributes || {});
+									}).join("<br>");
+									frappe.msgprint({
+										title: __("Some variants could not be created"),
+										indicator: "red",
+										message: errText
+									});
+								}
+								page.load_variants();
+							},
+							error: function(err) {
+								frappe.msgprint(__("Error: {0}", [err.message || "Unknown error"]));
+							}
+						});
+					},
+					secondary_action_label: __("Cancel"),
+					secondary_action: function() {
+						d.hide();
+					}
+				});
+
+				d.$wrapper.css("z-index", "1050");
+
+				var $wrap = d.fields_dict.missing_variants_list.$wrapper;
+				var $list = $("<div>")
+					.addClass("missing-variants-scroll")
+					.css({ maxHeight: "320px", overflowY: "auto", border: "1px solid var(--border-color)", padding: "8px", borderRadius: "4px" });
+
+				missing.forEach(function(combo, idx) {
+					var $row = $("<div>").css({ padding: "6px 0", borderBottom: "1px solid var(--border-color)" });
+					var $cb = $("<input>", {
+						type: "checkbox",
+						class: "missing-variant-cb",
+						"data-idx": idx,
+						checked: true
+					});
+					$row.append($("<label>").css({ margin: 0, cursor: "pointer", fontWeight: "normal" }).append($cb).append(" ").append($("<span>").text(format_combo(combo))));
+					$list.append($row);
+				});
+
+				$wrap.empty().append($list);
+
+				d.show();
+			},
+			error: function(r) {
+				frappe.msgprint(__("Error: {0}", [r.message || "Unknown error"]));
 			}
 		});
 	};

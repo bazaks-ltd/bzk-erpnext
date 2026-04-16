@@ -1,11 +1,13 @@
 # Copyright (c) 2025, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
 
+import json
+
 import frappe
 from frappe import _
-from frappe.utils import flt, nowdate
+from frappe.utils import cstr, flt, nowdate
 from erpnext.stock.utils import get_latest_stock_qty
-from erpnext.controllers.item_variant import create_variant
+from erpnext.controllers.item_variant import create_variant, generate_keyed_value_combinations, get_variant
 
 
 @frappe.whitelist()
@@ -165,50 +167,54 @@ def get_variants_data(template_item, company=None, warehouse=None, filter_attrib
 	}
 
 
-@frappe.whitelist()
-def update_variant_price(variant_code, price_list, rate, currency=None, uom=None):
-	"""Update or create price for a variant"""
-	
+def _set_variant_item_price(variant_code, price_list, rate, currency=None, uom=None):
+	"""Update or create Item Price without committing."""
+
 	if not variant_code or not price_list or rate is None:
 		frappe.throw(_("Variant Code, Price List, and Rate are required"))
-	
-	# Get price list details
+
 	pl_doc = frappe.get_doc("Price List", price_list)
 	if not pl_doc.enabled:
 		frappe.throw(_("Price List {0} is not enabled").format(price_list))
-	
+
 	currency = currency or pl_doc.currency
-	
-	# Get item UOM if not provided
+
 	if not uom:
 		uom = frappe.db.get_value("Item", variant_code, "stock_uom")
-	
-	# Check if price exists
+
 	existing_price = frappe.db.get_value(
 		"Item Price",
 		{
 			"item_code": variant_code,
 			"price_list": price_list,
 			"uom": uom,
-			"currency": currency
-		}
+			"currency": currency,
+		},
 	)
-	
+
 	if existing_price:
 		frappe.db.set_value("Item Price", existing_price, "price_list_rate", flt(rate))
 	else:
-		price_doc = frappe.get_doc({
-			"doctype": "Item Price",
-			"item_code": variant_code,
-			"price_list": price_list,
-			"price_list_rate": flt(rate),
-			"currency": currency,
-			"uom": uom
-		})
+		price_doc = frappe.get_doc(
+			{
+				"doctype": "Item Price",
+				"item_code": variant_code,
+				"price_list": price_list,
+				"price_list_rate": flt(rate),
+				"currency": currency,
+				"uom": uom,
+			}
+		)
 		price_doc.insert()
-	
+
+
+@frappe.whitelist()
+def update_variant_price(variant_code, price_list, rate, currency=None, uom=None):
+	"""Update or create price for a variant"""
+
+	_set_variant_item_price(variant_code, price_list, rate, currency=currency, uom=uom)
 	frappe.db.commit()
-	
+
 	return {"success": True}
 
 
@@ -348,6 +354,137 @@ def create_variant_from_manager(template_item, attributes):
 		"variant_code": variant.item_code,
 		"variant_name": variant.name
 	}
+
+
+MAX_MISSING_VARIANT_COMBINATIONS = 500
+
+
+def _numeric_attribute_values(from_range, to_range, increment):
+	increment = flt(increment)
+	if increment <= 0:
+		frappe.throw(_("Increment must be greater than zero for numeric variant attributes"))
+	values = []
+	current = flt(from_range)
+	end = flt(to_range)
+	# guard against huge ranges
+	max_steps = 10000
+	steps = 0
+	while current <= end + 1e-9 and steps < max_steps:
+		values.append(current)
+		current = flt(current + increment)
+		steps += 1
+	if steps >= max_steps:
+		frappe.throw(
+			_("Numeric attribute range produces too many steps. Reduce the range or increase the increment.")
+		)
+	return values
+
+
+@frappe.whitelist()
+def get_missing_variant_combinations(template_item):
+	"""Return attribute dicts for combinations that do not yet exist as Item variants."""
+
+	if not template_item:
+		frappe.throw(_("Template Item is required"))
+
+	template_doc = frappe.get_doc("Item", template_item)
+	if not template_doc.has_variants:
+		frappe.throw(_("Item {0} does not have variants").format(template_item))
+	if template_doc.variant_based_on != "Item Attribute":
+		frappe.throw(_("Missing variants is only available when variant based on is Item Attribute"))
+
+	value_map = {}
+	for row in template_doc.attributes:
+		if row.numeric_values:
+			values = _numeric_attribute_values(row.from_range, row.to_range, row.increment)
+		else:
+			values = frappe.get_all(
+				"Item Attribute Value",
+				pluck="attribute_value",
+				filters={"parent": row.attribute},
+				order_by="idx",
+			)
+			values = [cstr(v) for v in values]
+		if not values:
+			frappe.throw(_("No values defined for attribute {0}").format(row.attribute))
+		value_map[row.attribute] = values
+
+	total = 1
+	for vals in value_map.values():
+		total *= len(vals)
+
+	if total > MAX_MISSING_VARIANT_COMBINATIONS:
+		frappe.throw(
+			_(
+				"There are {0} possible combinations. This tool can check at most {1}. "
+				"Reduce attribute values or ranges before using Missing Variants."
+			).format(total, MAX_MISSING_VARIANT_COMBINATIONS)
+		)
+
+	missing = []
+	for combo in generate_keyed_value_combinations(value_map):
+		if not get_variant(template_item, args=combo):
+			# JSON-safe for the client (floats stay as numbers)
+			missing.append({k: (flt(v) if isinstance(v, (int, float)) else cstr(v)) for k, v in combo.items()})
+
+	return missing
+
+
+@frappe.whitelist()
+def create_missing_variants_batch(
+	template_item, combinations, valuation_rate, standard_selling_rate, price_list=None
+):
+	"""Create variants for the given attribute combinations and set valuation + Standard Selling price."""
+
+	if isinstance(combinations, str):
+		combinations = json.loads(combinations)
+
+	if not template_item:
+		frappe.throw(_("Template Item is required"))
+	if not combinations:
+		frappe.throw(_("Select at least one variant to create"))
+	if valuation_rate is None or valuation_rate == "":
+		frappe.throw(_("Valuation Rate is required"))
+	if standard_selling_rate is None or standard_selling_rate == "":
+		frappe.throw(_("Standard Selling Rate is required"))
+
+	if not price_list:
+		price_list = frappe.db.get_single_value("Selling Settings", "selling_price_list") or "Standard Selling"
+
+	valuation_rate = flt(valuation_rate)
+	standard_selling_rate = flt(standard_selling_rate)
+
+	template_doc = frappe.get_doc("Item", template_item)
+	if not template_doc.has_variants:
+		frappe.throw(_("Item {0} does not have variants").format(template_item))
+
+	required_attrs = [row.attribute for row in template_doc.attributes]
+
+	created = []
+	errors = []
+
+	for attrs in combinations:
+		if not isinstance(attrs, dict):
+			errors.append({"attributes": attrs, "error": _("Invalid combination payload")})
+			continue
+		try:
+			for attr in required_attrs:
+				if attr not in attrs:
+					frappe.throw(_("Missing value for attribute {0}").format(attr))
+			if get_variant(template_item, args=attrs):
+				errors.append({"attributes": attrs, "error": _("Variant already exists")})
+				continue
+			variant = create_variant(template_item, attrs)
+			variant.insert()
+			frappe.db.set_value("Item", variant.item_code, "valuation_rate", valuation_rate)
+			_set_variant_item_price(variant.item_code, price_list, standard_selling_rate)
+			frappe.db.commit()
+			created.append(variant.item_code)
+		except Exception as e:
+			frappe.db.rollback()
+			errors.append({"attributes": attrs, "error": cstr(e)})
+
+	return {"created": created, "errors": errors, "price_list": price_list}
 
 
 @frappe.whitelist()
